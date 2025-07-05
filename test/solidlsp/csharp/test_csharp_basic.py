@@ -263,3 +263,59 @@ class TestCSharpSolutionProjectOpening:
 
         # Verify the file actually exists
         assert os.path.exists(result)
+
+    @patch("solidlsp.language_servers.csharp_language_server.csharp_language_server.CSharpLanguageServer._ensure_server_installed")
+    @patch("solidlsp.language_servers.csharp_language_server.csharp_language_server.SolidLanguageServer.__init__")
+    def test_project_loading_error_handling(self, mock_super_init, mock_ensure_server_installed):
+        """Test that project loading errors are handled gracefully."""
+        with tempfile.TemporaryDirectory() as cache_dir:
+            # Mock the server installation
+            mock_ensure_server_installed.return_value = ("/usr/bin/dotnet", "/path/to/server.dll", Path(cache_dir))
+            mock_super_init.return_value = None
+
+            # Create test directory with multiple project files
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                
+                # Create multiple project files
+                project1 = temp_path / "Project1.csproj"
+                project2 = temp_path / "Project2.csproj"
+                project3 = temp_path / "Project3.csproj"
+                project1.touch()
+                project2.touch()
+                project3.touch()
+
+                # Mock logger to capture log messages
+                mock_logger = Mock()
+                mock_config = Mock(spec=LanguageServerConfig)
+                mock_config.ignored_paths = []
+
+                # Create CSharpLanguageServer instance
+                server = CSharpLanguageServer(mock_config, mock_logger, str(temp_path))
+                
+                # Mock server and notify attributes
+                server.server = Mock()
+                server.logger = mock_logger
+                server.repository_root_path = str(temp_path)
+                
+                # Mock send_notification to fail on the second project
+                def mock_send_notification(method, params):
+                    if method == "project/open" and "Project2.csproj" in str(params):
+                        raise Exception("Failed to open Project2")
+                
+                server.server.notify = Mock()
+                server.server.notify.send_notification = Mock(side_effect=mock_send_notification)
+                
+                # Call the _open_solution_and_projects method
+                server._open_solution_and_projects()
+                
+                # Verify that it tried to open all projects
+                assert server.server.notify.send_notification.call_count == 3
+                
+                # Verify warning was logged for the failed project
+                warning_calls = [call for call in mock_logger.log.call_args_list if call[0][1] == 30]  # logging.WARNING
+                assert any("Failed to open project file" in str(call) and "Project2.csproj" in str(call) for call in warning_calls)
+                
+                # Verify success was logged for successfully opened projects
+                info_calls = [call for call in mock_logger.log.call_args_list if call[0][1] == 20]  # logging.INFO
+                assert any("Successfully opened 2 project files" in str(call) for call in info_calls)

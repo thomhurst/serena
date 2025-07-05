@@ -769,9 +769,12 @@ class CSharpLanguageServer(SolidLanguageServer):
 
         # Send solution/open notification if solution file found
         if solution_file:
-            solution_uri = PathUtils.path_to_uri(solution_file)
-            self.server.notify.send_notification("solution/open", {"solution": solution_uri})
-            self.logger.log(f"Opened solution file: {solution_file}", logging.INFO)
+            try:
+                solution_uri = PathUtils.path_to_uri(solution_file)
+                self.server.notify.send_notification("solution/open", {"solution": solution_uri})
+                self.logger.log(f"Opened solution file: {solution_file}", logging.INFO)
+            except Exception as e:
+                self.logger.log(f"Failed to open solution file {solution_file}: {e}", logging.WARNING)
 
         # Find and open project files
         project_files = []
@@ -779,8 +782,23 @@ class CSharpLanguageServer(SolidLanguageServer):
             if filename.endswith(".csproj"):
                 project_files.append(filename)
 
-        # Send project/open notifications for each project file
+        # Send project/open notifications for each project file individually
         if project_files:
-            project_uris = [PathUtils.path_to_uri(project_file) for project_file in project_files]
-            self.server.notify.send_notification("project/open", {"projects": project_uris})
-            self.logger.log(f"Opened project files: {project_files}", logging.DEBUG)
+            successfully_opened = []
+            failed_projects = []
+
+            for project_file in project_files:
+                try:
+                    project_uri = PathUtils.path_to_uri(project_file)
+                    self.server.notify.send_notification("project/open", {"projects": [project_uri]})
+                    successfully_opened.append(project_file)
+                    self.logger.log(f"Opened project file: {project_file}", logging.DEBUG)
+                except Exception as e:
+                    failed_projects.append(project_file)
+                    self.logger.log(f"Failed to open project file {project_file}: {e}", logging.WARNING)
+
+            if successfully_opened:
+                self.logger.log(f"Successfully opened {len(successfully_opened)} project files", logging.INFO)
+
+            if failed_projects:
+                self.logger.log(f"Failed to open {len(failed_projects)} project files: {failed_projects}", logging.WARNING)
