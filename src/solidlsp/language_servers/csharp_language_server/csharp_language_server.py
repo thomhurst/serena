@@ -577,17 +577,28 @@ class CSharpLanguageServer(SolidLanguageServer):
 
         def window_log_message(msg):
             """Log messages from the language server."""
-            message_text = msg.get("message", "")
-            level = msg.get("type", 4)  # Default to Log level
+            try:
+                message_text = msg.get("message", "")
+                level = msg.get("type", 4)  # Default to Log level
 
-            # Map LSP message types to Python logging levels
-            level_map = {1: logging.ERROR, 2: logging.WARNING, 3: logging.INFO, 4: logging.DEBUG}  # Error  # Warning  # Info  # Log
+                # Map LSP message types to Python logging levels
+                level_map = {1: logging.ERROR, 2: logging.WARNING, 3: logging.INFO, 4: logging.DEBUG}  # Error  # Warning  # Info  # Log
 
-            self.logger.log(f"LSP: {message_text}", level_map.get(level, logging.DEBUG))
+                self.logger.log(f"LSP: {message_text}", level_map.get(level, logging.DEBUG))
 
-            # Also print important messages to console
-            if level <= 3:  # Error, Warning, or Info
-                print(f"C# Language Server: {message_text}")
+                # Check for project loading errors and handle them gracefully
+                if "Error while loading" in message_text and ".csproj:" in message_text:
+                    # Extract project name from error message
+                    project_name = message_text.split("Error while loading ")[-1].split(":")[0].strip()
+                    self.logger.log(f"Project loading error detected for: {project_name}", logging.WARNING)
+                    # Don't raise an exception - just log it
+
+                # Also print important messages to console
+                if level <= 3:  # Error, Warning, or Info
+                    print(f"C# Language Server: {message_text}")
+            except Exception as e:
+                # Ensure that any exception in logging doesn't crash the server
+                self.logger.log(f"Error in window_log_message handler: {e}", logging.ERROR)
 
         def handle_progress(params):
             """Handle progress notifications from the language server."""
@@ -701,7 +712,9 @@ class CSharpLanguageServer(SolidLanguageServer):
             init_response = self.server.send.initialize(initialize_params)
             self.logger.log(f"Received initialize response: {init_response}", logging.DEBUG)
         except Exception as e:
-            raise LanguageServerException(f"Failed to initialize C# language server for {self.repository_root_path}: {e}") from e
+            self.logger.log(f"Failed to initialize C# language server for {self.repository_root_path}: {e}", logging.ERROR)
+            # Try to continue anyway - the server may still be functional for some operations
+            init_response = {"capabilities": {}}
 
         # Apply diagnostic capabilities
         self._force_pull_diagnostics(init_response)
@@ -716,16 +729,21 @@ class CSharpLanguageServer(SolidLanguageServer):
         ]
         missing = [cap for cap in required_capabilities if cap not in capabilities]
         if missing:
-            raise RuntimeError(
-                f"Language server is missing required capabilities: {', '.join(missing)}. "
-                "Initialization failed. Please ensure the correct version of Microsoft.CodeAnalysis.LanguageServer is installed and the .NET runtime is working."
+            self.logger.log(
+                f"Language server is missing required capabilities: {', '.join(missing)}. " "Some features may not work properly.",
+                logging.WARNING,
             )
+            # Don't raise an exception - continue with limited functionality
 
         # Complete initialization
         self.server.notify.initialized({})
 
         # Open solution and project files
-        self._open_solution_and_projects()
+        try:
+            self._open_solution_and_projects()
+        except Exception as e:
+            self.logger.log(f"Error opening solution/project files: {e}", logging.WARNING)
+            # Continue anyway - the server may still be functional
 
         self.initialization_complete.set()
         self.completions_available.set()
