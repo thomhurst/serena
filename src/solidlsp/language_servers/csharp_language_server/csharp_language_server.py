@@ -674,23 +674,16 @@ class CSharpLanguageServer(SolidLanguageServer):
 
             return result
 
-        def handle_work_done_progress_create(params):
-            """Handle work done progress create requests."""
-            # Just acknowledge the request
-            return
-
-        def handle_register_capability(params):
-            """Handle client/registerCapability requests."""
-            # Just acknowledge the request - we don't need to track these for now
-            return
-
         # Set up notification handlers
         self.server.on_notification("window/logMessage", window_log_message)
         self.server.on_notification("$/progress", handle_progress)
         self.server.on_notification("textDocument/publishDiagnostics", do_nothing)
         self.server.on_request("workspace/configuration", handle_workspace_configuration)
-        self.server.on_request("window/workDoneProgress/create", handle_work_done_progress_create)
-        self.server.on_request("client/registerCapability", handle_register_capability)
+        # Just acknowledge these requests
+        self.server.on_request("window/workDoneProgress/create", lambda params: None)
+        self.server.on_request("client/registerCapability", lambda params: None)
+        # Tell the language server to restore project dependencies for proper analysis
+        self.server.on_request("workspace/_roslyn_projectNeedsRestore", lambda params: True)
 
         self.logger.log("Starting Microsoft.CodeAnalysis.LanguageServer process", logging.INFO)
 
